@@ -71,7 +71,7 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
     private SavedState mSavedState;
     private ClipboardManager mClipboardManager;
     private String mText;
-    private Map<AttachmentViewInfo, AttachmentView> attachments = new HashMap<AttachmentViewInfo, AttachmentView>();
+    private Map<AttachmentViewInfo, AttachmentView> attachments = new HashMap<>();
 
 
     @Override
@@ -79,7 +79,9 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
         super.onFinishInflate();
 
         mMessageContentView = (MessageWebView) findViewById(R.id.message_content);
-        mMessageContentView.configure();
+        if (!isInEditMode()) {
+            mMessageContentView.configure();
+        }
         mMessageContentView.setOnCreateContextMenuListener(this);
         mMessageContentView.setVisibility(View.VISIBLE);
 
@@ -400,10 +402,7 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
         WebViewClient webViewClient = K9WebViewClient.newInstance(messageViewInfo.rootPart);
         mMessageContentView.setWebViewClient(webViewClient);
 
-        boolean hasAttachments = !messageViewInfo.attachments.isEmpty();
-        if (hasAttachments) {
-            renderAttachments(messageViewInfo);
-        }
+        renderAttachments(messageViewInfo);
 
         mHiddenAttachments.setVisibility(View.GONE);
 
@@ -451,14 +450,30 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
     }
 
     public void renderAttachments(MessageViewInfo messageViewInfo) throws MessagingException {
-        for (AttachmentViewInfo attachment : messageViewInfo.attachments) {
-            ViewGroup parent = attachment.firstClassAttachment ? mAttachments : mHiddenAttachments;
-            AttachmentView view = (AttachmentView) mInflater.inflate(R.layout.message_view_attachment, parent, false);
-            view.setCallback(attachmentCallback);
-            view.setAttachment(attachment);
+        if (messageViewInfo.attachments != null) {
+            for (AttachmentViewInfo attachment : messageViewInfo.attachments) {
+                ViewGroup parent = attachment.firstClassAttachment ? mAttachments : mHiddenAttachments;
+                AttachmentView view =
+                        (AttachmentView) mInflater.inflate(R.layout.message_view_attachment, parent, false);
+                view.setCallback(attachmentCallback);
+                view.setAttachment(attachment);
 
-            attachments.put(attachment, view);
-            parent.addView(view);
+                attachments.put(attachment, view);
+                parent.addView(view);
+            }
+        }
+
+        if (messageViewInfo.extraAttachments != null) {
+            for (AttachmentViewInfo attachment : messageViewInfo.extraAttachments) {
+                ViewGroup parent = attachment.firstClassAttachment ? mAttachments : mHiddenAttachments;
+                LockedAttachmentView view = (LockedAttachmentView) mInflater
+                        .inflate(R.layout.message_view_attachment_locked, parent, false);
+                view.setCallback(attachmentCallback);
+                view.setAttachment(attachment);
+
+                // attachments.put(attachment, view);
+                parent.addView(view);
+            }
         }
     }
 
