@@ -35,8 +35,9 @@ public abstract class K9WebViewClient extends WebViewClient {
     private static final String CID_SCHEME = "cid";
     private static final WebResourceResponse RESULT_DO_NOT_INTERCEPT = null;
     private static final WebResourceResponse RESULT_DUMMY_RESPONSE = new WebResourceResponse(null, null, null);
+    private OnPageFinishedListener onPageFinishedListener;
 
-    public static WebViewClient newInstance(Part part) {
+    public static K9WebViewClient newInstance(Part part) {
         if (Build.VERSION.SDK_INT < 21) {
             return new PreLollipopWebViewClient(part);
         }
@@ -133,6 +134,21 @@ public abstract class K9WebViewClient extends WebViewClient {
         return null;
     }
 
+    public void setOnPageFinishedListener(OnPageFinishedListener onPageFinishedListener) {
+        this.onPageFinishedListener = onPageFinishedListener;
+    }
+
+    @Override
+    public void onPageFinished(WebView view, String url) {
+        super.onPageFinished(view, url);
+        if (onPageFinishedListener != null) {
+            onPageFinishedListener.onPageFinished();
+        }
+    }
+
+    public interface OnPageFinishedListener {
+        void onPageFinished();
+    }
 
     @SuppressWarnings("deprecation")
     private static class PreLollipopWebViewClient extends K9WebViewClient {

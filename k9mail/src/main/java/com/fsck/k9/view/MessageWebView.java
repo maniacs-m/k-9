@@ -2,13 +2,19 @@ package com.fsck.k9.view;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.os.Build.VERSION;
+import android.os.Build.VERSION_CODES;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.webkit.WebSettings;
+import android.webkit.WebSettings.LayoutAlgorithm;
+import android.webkit.WebSettings.RenderPriority;
+import android.webkit.WebView;
 import android.widget.Toast;
 
 import com.fsck.k9.K9;
+import com.fsck.k9.K9.Theme;
 import com.fsck.k9.R;
 import com.fsck.k9.helper.HtmlConverter;
 import com.fsck.k9.helper.HtmlSanitizer;
@@ -46,7 +52,7 @@ public class MessageWebView extends RigidWebView {
 
 
     /**
-     * Configure a {@link android.webkit.WebView} to display a Message. This method takes into account a user's
+     * Configure a {@link WebView} to display a Message. This method takes into account a user's
      * preferences when configuring the view. This message is used to view a message and to display a message being
      * replied to.
      */
@@ -56,7 +62,7 @@ public class MessageWebView extends RigidWebView {
         this.setScrollBarStyle(SCROLLBARS_INSIDE_OVERLAY);
         this.setLongClickable(true);
 
-        if (K9.getK9MessageViewTheme() == K9.Theme.DARK) {
+        if (K9.getK9MessageViewTheme() == Theme.DARK) {
             // Black theme should get a black webview background
             // we'll set the background of the messages on load
             this.setBackgroundColor(0xff000000);
@@ -65,6 +71,12 @@ public class MessageWebView extends RigidWebView {
         final WebSettings webSettings = this.getSettings();
 
         webSettings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+
+        /* TODO this might improve rendering smoothness when webview is animated into view
+        if (VERSION.SDK_INT >= VERSION_CODES.M) {
+            webSettings.setOffscreenPreRaster(true);
+        }
+        */
 
         webSettings.setSupportZoom(true);
         webSettings.setBuiltInZoomControls(true);
@@ -77,10 +89,10 @@ public class MessageWebView extends RigidWebView {
 
         webSettings.setJavaScriptEnabled(false);
         webSettings.setLoadsImagesAutomatically(true);
-        webSettings.setRenderPriority(WebSettings.RenderPriority.HIGH);
+        webSettings.setRenderPriority(RenderPriority.HIGH);
 
         // TODO:  Review alternatives.  NARROW_COLUMNS is deprecated on KITKAT
-        webSettings.setLayoutAlgorithm(WebSettings.LayoutAlgorithm.NARROW_COLUMNS);
+        webSettings.setLayoutAlgorithm(LayoutAlgorithm.NARROW_COLUMNS);
 
         setOverScrollMode(OVER_SCROLL_NEVER);
 
