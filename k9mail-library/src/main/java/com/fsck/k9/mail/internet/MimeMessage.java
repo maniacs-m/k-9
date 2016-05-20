@@ -530,6 +530,9 @@ public class MimeMessage extends Message {
                 String contentType = e.getContentType();
                 String mimeType = MimeUtility.getHeaderParameter(contentType, null);
                 String boundary = MimeUtility.getHeaderParameter(contentType, "boundary");
+                if (boundary == null) {
+                    boundary = MimeMultipart.generateBoundary();
+                }
                 MimeMultipart multiPart = new MimeMultipart(mimeType, boundary);
                 e.setBody(multiPart);
                 stack.addFirst(multiPart);
