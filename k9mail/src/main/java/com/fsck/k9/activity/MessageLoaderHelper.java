@@ -9,6 +9,8 @@ import android.content.Intent;
 import android.content.IntentSender;
 import android.content.Loader;
 import android.os.Bundle;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.annotation.UiThread;
 
 import com.fsck.k9.Account;
@@ -27,7 +29,6 @@ import com.fsck.k9.ui.message.LocalMessageLoader;
 
 
 public class MessageLoaderHelper {
-
     private static final int LOCAL_MESSAGE_LOADER_ID = 1;
     private static final int DECODE_MESSAGE_LOADER_ID = 2;
 
@@ -36,7 +37,8 @@ public class MessageLoaderHelper {
     private final Context context;
     private final FragmentManager fragmentManager;
     private final LoaderManager loaderManager;
-    private final MessageLoaderCallbacks view;
+    @Nullable // may be cleared
+    private MessageLoaderCallbacks callback;
 
 
     // transient state
@@ -51,11 +53,11 @@ public class MessageLoaderHelper {
 
 
     public MessageLoaderHelper(Context context, LoaderManager loaderManager, FragmentManager fragmentManager,
-            MessageLoaderCallbacks view) {
+            @NonNull MessageLoaderCallbacks callback) {
         this.context = context;
         this.loaderManager = loaderManager;
         this.fragmentManager = fragmentManager;
-        this.view = view;
+        this.callback = callback;
     }
 
 
@@ -74,6 +76,8 @@ public class MessageLoaderHelper {
         cancelAndClearLocalMessageLoader();
         cancelAndClearDecodeLoader();
         cancelAndClearCryptoOperation();
+
+        callback = null;
     }
 
     @UiThread
@@ -81,13 +85,13 @@ public class MessageLoaderHelper {
         if (messageCryptoHelper != null) {
             messageCryptoHelper.detachCallback();
         }
+
+        callback = null;
     }
 
     @UiThread
     public void restartMessageCryptoProcessing() {
         cancelAndClearCryptoOperation();
-        // TODO
-        // mMessageView.setToLoadingState();
         startOrResumeCryptoOperation();
     }
 
@@ -114,7 +118,11 @@ public class MessageLoaderHelper {
 
     @UiThread
     private void onLoadMessageFromDatabaseFinished() {
-        view.onMessageLoadFinished(localMessage);
+        if (callback == null) {
+            throw new IllegalStateException("unexpected call when callback is already detached");
+        }
+
+        callback.onMessageLoadFinished(localMessage);
 
         if (localMessage.isBodyMissing()) {
             startDownloadingMessageBody(false);
@@ -130,7 +138,10 @@ public class MessageLoaderHelper {
     }
 
     private void onLoadMessageFromDatabaseFailed() {
-        view.onMessageLoadFailed();
+        if (callback == null) {
+            throw new IllegalStateException("unexpected call when callback is already detached");
+        }
+        callback.onMessageLoadFailed();
     }
 
     private void cancelAndClearLocalMessageLoader() {
@@ -200,11 +211,19 @@ public class MessageLoaderHelper {
     private MessageCryptoCallback messageCryptoCallback = new MessageCryptoCallback() {
         @Override
         public void onCryptoHelperProgress(int current, int max) {
-            view.setLoadingProgress(current, max);
+            if (callback == null) {
+                throw new IllegalStateException("unexpected call when callback is already detached");
+            }
+
+            callback.setLoadingProgress(current, max);
         }
 
         @Override
         public void onCryptoOperationsFinished(MessageCryptoAnnotations annotations) {
+            if (callback == null) {
+                throw new IllegalStateException("unexpected call when callback is already detached");
+            }
+
             messageCryptoAnnotations = annotations;
             startOrResumeDecodeMessage();
         }
@@ -212,7 +231,11 @@ public class MessageLoaderHelper {
         @Override
         public void startPendingIntentForCryptoHelper(IntentSender si, int requestCode, Intent fillIntent,
                 int flagsMask, int flagValues, int extraFlags) {
-            view.startIntentSenderForMessageLoaderHelper(si, requestCode, fillIntent,
+            if (callback == null) {
+                throw new IllegalStateException("unexpected call when callback is already detached");
+            }
+
+            callback.startIntentSenderForMessageLoaderHelper(si, requestCode, fillIntent,
                     flagsMask, flagValues, extraFlags);
         }
     };
@@ -225,12 +248,16 @@ public class MessageLoaderHelper {
     }
 
     private void onDecodeMessageFinished(MessageViewInfo messageViewInfo) {
+        if (callback == null) {
+            throw new IllegalStateException("unexpected call when callback is already detached");
+        }
+
         if (messageViewInfo == null) {
-            view.onMessageViewInfoLoadFailed(localMessage);
+            callback.onMessageViewInfoLoadFailed(localMessage);
             return;
         }
 
-        view.onMessageViewInfoLoadFinished(localMessage, messageViewInfo);
+        callback.onMessageViewInfoLoadFinished(localMessage, messageViewInfo);
     }
 
     private void cancelAndClearDecodeLoader() {
@@ -277,6 +304,10 @@ public class MessageLoaderHelper {
     }
 
     private void onMessageDownloadFinished() {
+        if (callback == null) {
+            return;
+        }
+
         cancelAndClearLocalMessageLoader();
         cancelAndClearDecodeLoader();
         cancelAndClearCryptoOperation();
@@ -285,10 +316,14 @@ public class MessageLoaderHelper {
     }
 
     private void onDownloadMessageFailed(final Throwable t) {
+        if (callback == null) {
+            return;
+        }
+
         if (t instanceof IllegalArgumentException) {
-            view.onDownloadErrorMessageNotFound();
+            callback.onDownloadErrorMessageNotFound();
         } else {
-            view.onDownloadErrorNetworkError();
+            callback.onDownloadErrorNetworkError();
         }
     }
 

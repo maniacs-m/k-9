@@ -145,9 +145,7 @@ public class MessageViewFragment extends Fragment implements ConfirmationDialogF
             return;
         }
 
-        if (messageLoaderHelper != null) {
-            messageLoaderHelper.onDestroy();
-        }
+        messageLoaderHelper.onDestroy();
     }
 
     @Override
@@ -667,6 +665,7 @@ public class MessageViewFragment extends Fragment implements ConfirmationDialogF
 
     @Override
     public void restartMessageCryptoProcessing() {
+        mMessageView.setToLoadingState();
         messageLoaderHelper.restartMessageCryptoProcessing();
     }
 
