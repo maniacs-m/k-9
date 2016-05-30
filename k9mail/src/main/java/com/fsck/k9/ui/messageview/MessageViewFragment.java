@@ -171,7 +171,7 @@ public class MessageViewFragment extends Fragment implements ConfirmationDialogF
             @Override
             public void onClick(View v) {
                 mMessageView.disableDownloadButton();
-                messageLoaderHelper.onClickDownloadCompleteMessage();
+                messageLoaderHelper.downloadCompleteMessage();
             }
         });
 

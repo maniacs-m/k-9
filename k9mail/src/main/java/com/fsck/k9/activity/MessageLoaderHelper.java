@@ -12,8 +12,10 @@ import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.UiThread;
+import android.util.Log;
 
 import com.fsck.k9.Account;
+import com.fsck.k9.K9;
 import com.fsck.k9.Preferences;
 import com.fsck.k9.controller.MessagingController;
 import com.fsck.k9.controller.MessagingListener;
@@ -28,6 +30,40 @@ import com.fsck.k9.ui.message.LocalMessageExtractorLoader;
 import com.fsck.k9.ui.message.LocalMessageLoader;
 
 
+/** This class is responsible for loading a message start to finish, and
+ * retaining or reloading the loading state on configuration changes.
+ *
+ * In particular, it takes care of the following:
+ *  - load raw message data from the database, using LocalMessageLoader
+ *  - download partial message content if it is missing using MessagingController
+ *  - apply crypto operations if applicable, using MessageCryptoHelper
+ *  - extract MessageViewInfo from the message and crypto data using DecodeMessageLoader
+ *  - download complete message content for partially downloaded messages if requested
+ *
+ * No state is retained in this object itself. Instead, state is stored in the
+ * message loaders and the MessageCryptoHelper which is stored in a
+ * RetainFragment. The public interface is intended for use by an Activity or
+ * Fragment, which should construct a new instance of this class in onCreate,
+ * then call asyncStartOrResumeLoadingMessage to start or resume loading the
+ * message, receiving callbacks when it is loaded.
+ *
+ * When the Activity or Fragment is ultimately destroyed, it should call
+ * onDestroy, which stops loading and deletes all state kept in loaders and
+ * fragments by this object. If it is only destroyed for a configuration
+ * change, it should call onDestroyChangingConfigurations, which cancels any
+ * further callbacks from this object but retains the loading state to resume
+ * from at the next call to asyncStartOrResumeLoadingMessage.
+ *
+ * If the message is already loaded, a call to asyncStartOrResumeLoadingMessage
+ * will typically load by starting the decode message loader, retrieving the
+ * already cached LocalMessage. This message will be passed to the retained
+ * CryptoMessageHelper instance, returning the already cached
+ * MessageCryptoAnnotations. These two objects will be checked against the
+ * retained DecodeMessageLoader, returning the final result. At each
+ * intermediate step, the input of the respective loaders will be checked for
+ * consistency, reloading if there is a mismatch.
+ *
+ */
 public class MessageLoaderHelper {
     private static final int LOCAL_MESSAGE_LOADER_ID = 1;
     private static final int DECODE_MESSAGE_LOADER_ID = 2;
@@ -49,7 +85,6 @@ public class MessageLoaderHelper {
     private MessageCryptoAnnotations messageCryptoAnnotations;
 
     private MessageCryptoHelper messageCryptoHelper;
-    private RetainFragment<MessageCryptoHelper> retainCryptoHelperFragment;
 
 
     public MessageLoaderHelper(Context context, LoaderManager loaderManager, FragmentManager fragmentManager,
@@ -71,15 +106,18 @@ public class MessageLoaderHelper {
         startOrResumeLocalMessageLoader();
     }
 
+    /** Cancels all loading processes, prevents future callbacks, and destroys all loading state. */
     @UiThread
     public void onDestroy() {
-        cancelAndClearLocalMessageLoader();
-        cancelAndClearDecodeLoader();
-        cancelAndClearCryptoOperation();
+        if (messageCryptoHelper != null) {
+            messageCryptoHelper.cancelIfRunning();
+        }
 
         callback = null;
     }
 
+    /** Prevents future callbacks, but retains loading state to pick up from in a call to
+     * asyncStartOrResumeLoadingMessage in a new instance of this class. */
     @UiThread
     public void onDestroyChangingConfigurations() {
         if (messageCryptoHelper != null) {
@@ -90,8 +128,18 @@ public class MessageLoaderHelper {
     }
 
     @UiThread
+    public void downloadCompleteMessage() {
+        if (localMessage.isSet(Flag.X_DOWNLOADED_FULL)) {
+            return;
+        }
+
+        startDownloadingMessageBody(true);
+    }
+
+    @UiThread
     public void restartMessageCryptoProcessing() {
         cancelAndClearCryptoOperation();
+        cancelAndClearDecodeLoader();
         startOrResumeCryptoOperation();
     }
 
@@ -100,20 +148,23 @@ public class MessageLoaderHelper {
         messageCryptoHelper.onActivityResult(requestCode, resultCode, data);
     }
 
-    @UiThread
-    public void onClickDownloadCompleteMessage() {
-        if (localMessage.isSet(Flag.X_DOWNLOADED_FULL)) {
-            return;
-        }
-
-        startDownloadingMessageBody(true);
-    }
-
 
     // load from database
 
     private void startOrResumeLocalMessageLoader() {
-        loaderManager.initLoader(LOCAL_MESSAGE_LOADER_ID, null, localMessageLoaderCallback);
+        LocalMessageLoader loader =
+                (LocalMessageLoader) loaderManager.<LocalMessage>getLoader(LOCAL_MESSAGE_LOADER_ID);
+        boolean isLoaderStale = (loader == null) || !loader.isCreatedFor(messageReference);
+
+        if (isLoaderStale) {
+            Log.d(K9.LOG_TAG, "Creating new local message loader");
+            cancelAndClearCryptoOperation();
+            cancelAndClearDecodeLoader();
+            loaderManager.restartLoader(LOCAL_MESSAGE_LOADER_ID, null, localMessageLoaderCallback);
+        } else {
+            Log.d(K9.LOG_TAG, "Reusing local message loader");
+            loaderManager.initLoader(LOCAL_MESSAGE_LOADER_ID, null, localMessageLoaderCallback);
+        }
     }
 
     @UiThread
@@ -170,7 +221,6 @@ public class MessageLoaderHelper {
             } else {
                 onLoadMessageFromDatabaseFinished();
             }
-            loaderManager.destroyLoader(LOCAL_MESSAGE_LOADER_ID);
         }
 
         @Override
@@ -186,8 +236,7 @@ public class MessageLoaderHelper {
     // process with crypto helper
 
     private void startOrResumeCryptoOperation() {
-        retainCryptoHelperFragment =
-                RetainFragment.findOrCreate(fragmentManager, "crypto_helper_" + localMessage.hashCode());
+        RetainFragment<MessageCryptoHelper> retainCryptoHelperFragment = getMessageCryptoHelperRetainFragment();
         if (retainCryptoHelperFragment.hasData()) {
             messageCryptoHelper = retainCryptoHelperFragment.getData();
         } else {
@@ -198,14 +247,19 @@ public class MessageLoaderHelper {
     }
 
     private void cancelAndClearCryptoOperation() {
-        if (messageCryptoHelper != null) {
-            messageCryptoHelper.cancelIfRunning();
-            messageCryptoHelper = null;
-        }
+        RetainFragment<MessageCryptoHelper> retainCryptoHelperFragment = getMessageCryptoHelperRetainFragment();
         if (retainCryptoHelperFragment != null) {
+            if (retainCryptoHelperFragment.hasData()) {
+                messageCryptoHelper = retainCryptoHelperFragment.getData();
+                messageCryptoHelper.cancelIfRunning();
+                messageCryptoHelper = null;
+            }
             retainCryptoHelperFragment.clearAndRemove(fragmentManager);
-            retainCryptoHelperFragment = null;
         }
+    }
+
+    private RetainFragment<MessageCryptoHelper> getMessageCryptoHelperRetainFragment() {
+        return RetainFragment.findOrCreate(fragmentManager, "crypto_helper_" + messageReference.hashCode());
     }
 
     private MessageCryptoCallback messageCryptoCallback = new MessageCryptoCallback() {
@@ -244,7 +298,17 @@ public class MessageLoaderHelper {
     // decode message
 
     private void startOrResumeDecodeMessage() {
-        loaderManager.initLoader(DECODE_MESSAGE_LOADER_ID, null, decodeMessageLoaderCallback);
+        LocalMessageExtractorLoader loader =
+                (LocalMessageExtractorLoader) loaderManager.<MessageViewInfo>getLoader(DECODE_MESSAGE_LOADER_ID);
+        boolean isLoaderStale = (loader == null) || !loader.isCreatedFor(localMessage, messageCryptoAnnotations);
+
+        if (isLoaderStale) {
+            Log.d(K9.LOG_TAG, "Creating new decode message loader");
+            loaderManager.restartLoader(DECODE_MESSAGE_LOADER_ID, null, decodeMessageLoaderCallback);
+        } else {
+            Log.d(K9.LOG_TAG, "Reusing decode message loader");
+            loaderManager.initLoader(DECODE_MESSAGE_LOADER_ID, null, decodeMessageLoaderCallback);
+        }
     }
 
     private void onDecodeMessageFinished(MessageViewInfo messageViewInfo) {
