@@ -35,7 +35,6 @@ import com.fsck.k9.helper.ClipboardManager;
 import com.fsck.k9.helper.Contacts;
 import com.fsck.k9.helper.Utility;
 import com.fsck.k9.mail.Address;
-import com.fsck.k9.mail.MessagingException;
 import com.fsck.k9.mailstore.AttachmentViewInfo;
 import com.fsck.k9.mailstore.MessageViewInfo;
 import com.fsck.k9.view.K9WebViewClient;
@@ -77,6 +76,7 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
     private ClipboardManager mClipboardManager;
     private String mText;
     private Map<AttachmentViewInfo, AttachmentView> attachments = new HashMap<>();
+    private boolean hasHiddenExternalImages;
 
     @Override
     public void onFinishInflate() {
@@ -400,8 +400,7 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
 
     public void displayMessageViewContainer(MessageViewInfo messageViewInfo,
             final OnRenderingFinishedListener onRenderingFinishedListener, boolean automaticallyLoadPictures,
-            ShowPicturesController showPicturesController,
-            AttachmentViewCallback attachmentCallback) throws MessagingException {
+            AttachmentViewCallback attachmentCallback) {
 
         this.attachmentCallback = attachmentCallback;
 
@@ -420,11 +419,9 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
 
         mHiddenAttachments.setVisibility(View.GONE);
 
-        boolean lookForImages = true;
         if (mSavedState != null) {
             if (mSavedState.showingPictures) {
                 setLoadPictures(true);
-                lookForImages = false;
             }
 
             if (mSavedState.hiddenAttachmentsVisible) {
@@ -435,12 +432,12 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
         }
 
         mText = messageViewInfo.text;
-        if (mText != null && lookForImages) {
-            if (Utility.hasExternalImages(mText) && !isShowingPictures()) {
+        if (mText != null && !isShowingPictures()) {
+            if (Utility.hasExternalImages(mText)) {
                 if (automaticallyLoadPictures) {
                     setLoadPictures(true);
                 } else {
-                    showPicturesController.notifyMessageContainerContainsPictures(this);
+                    hasHiddenExternalImages = true;
                 }
             }
         }
@@ -460,6 +457,10 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
         loadBodyFromText(text);
     }
 
+    public boolean hasHiddenExternalImages() {
+        return hasHiddenExternalImages;
+    }
+
     public String wrapStatusMessage(String status) {
         return "<div style=\"text-align:center; color: grey;\">" + status + "</div>";
     }
@@ -468,7 +469,7 @@ public class MessageContainerView extends LinearLayout implements OnClickListene
         mMessageContentView.setText(emailText);
     }
 
-    public void renderAttachments(MessageViewInfo messageViewInfo) throws MessagingException {
+    public void renderAttachments(MessageViewInfo messageViewInfo) {
         if (messageViewInfo.attachments != null) {
             for (AttachmentViewInfo attachment : messageViewInfo.attachments) {
                 ViewGroup parent = attachment.firstClassAttachment ? mAttachments : mHiddenAttachments;
